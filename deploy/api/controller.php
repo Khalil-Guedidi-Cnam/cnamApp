@@ -33,7 +33,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 	    
 	    $response->getBody()->write($flux);
 	    
-	    return addHeaders ($response);
+	    return $response;
 	}
 
 	function optionsUtilisateur (Request $request, Response $response, $args) {
