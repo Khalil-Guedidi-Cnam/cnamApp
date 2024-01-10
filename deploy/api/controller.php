@@ -18,22 +18,57 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 	}
 	
 	function  getSearchCalatogue (Request $request, Response $response, $args) {
-	    $flux = '[
-			{"id":"1","name":"Produit 1","price":"20", "description": "Je suis un produit"}]';
-		
-	   $response->getBody()->write($flux);
-	   
+	    global $entityManager;
+
+        $queryParams = $request->getQueryParams();
+        $name = $queryParams['name'] ?? '';
+
+        $query = $entityManager->getRepository('Produits')->createQueryBuilder('p');
+
+        if ($name !== '') {
+            $query->where('LOWER(p.name) LIKE LOWER(:name)')
+                ->setParameter('name', '%' . $name . '%');
+            $products = $query->getQuery()->getResult();
+        } else {
+            $products = $entityManager->getRepository('Produits')->findAll();
+        }
+
+        $data = [];
+
+        foreach ($products as $product) {
+            $data[] = [
+                "name" => $product->getName(),
+                "price" => $product->getPrice(),
+                "description" => $product->getDescription(),
+                "image_url" => $product->getImageUrl()
+            ];
+        }
+
+        $response->getBody()->write(json_encode($data));
+
 	    return addHeaders ($response);
 	}
 
 	// API Nécessitant un Jwt valide
 	function getCatalogue (Request $request, Response $response, $args) {
-	    $flux = '[
-			{"id":"1","name":"Produit 1","price":"20", "description": "Je suis un produit"}]';
+        global $entityManager;
+
+        $products = $entityManager->getRepository('Produits')->findAll();
+
+	    $data = [];
+
+        foreach ($products as $product) {
+            $data[] = [
+                "name" => $product->getName(),
+                "price" => $product->getPrice(),
+                "description" => $product->getDescription(),
+                "image_url" => $product->getImageUrl()
+                ];
+        }
 	    
-	    $response->getBody()->write($flux);
+	    $response->getBody()->write(json_encode($data));
 	    
-	    return $response;
+	    return addHeaders ($response);
 	}
 
 	function optionsUtilisateur (Request $request, Response $response, $args) {
@@ -46,25 +81,97 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 	// API Nécessitant un Jwt valide
 	function getUtilisateur (Request $request, Response $response, $args) {
+	    global $entityManager;
 	    
 	    $payload = getJWTToken($request);
 	    $login  = $payload->userid;
 	    
-		$flux = '{"nom":"martin","prenom":"jean"}';
-	    
-	    $response->getBody()->write($flux);
-	    
+	    $utilisateurRepository = $entityManager->getRepository('Utilisateurs');
+	    $utilisateur = $utilisateurRepository->findOneBy(array('login' => $login));
+	    if ($utilisateur) {
+		$data = array('nom' => $utilisateur->getNom(), 'prenom' => $utilisateur->getPrenom());
+		$response = addHeaders ($response);
+		$response = createJwT ($response);
+		$response->getBody()->write(json_encode($data));
+	    } else {
+		$response = $response->withStatus(404);
+	    }
+
 	    return addHeaders ($response);
 	}
 
 	// APi d'authentification générant un JWT
 	function postLogin (Request $request, Response $response, $args) {   
-	    
-		$flux = '{"nom":"martin","prenom":"jean"}';
-	    
-	    $response = createJwT ($response);
-	    $response->getBody()->write($flux );
-	    
+	    global $entityManager;
+	    $err=false;
+	    $body = $request->getParsedBody();
+	    $login = $body ['login'] ?? "";
+	    $pass = $body ['password'] ?? "";
+
+ 	    if (!preg_match("/[a-zA-Z0-9]{1,20}/",$login))   {
+ 		    $err = true;
+ 	    }
+ 	    if (!preg_match("/[a-zA-Z0-9]{1,20}/",$pass))  {
+ 		    $err=true;
+ 	    }
+
+	    if (!$err) {
+		    $utilisateurRepository = $entityManager->getRepository('Utilisateurs');
+		    $utilisateur = $utilisateurRepository->findOneBy(array('login' => $login, 'password' => $pass));
+		    if ($utilisateur and $login == $utilisateur->getLogin() and $pass == $utilisateur->getPassword()) {
+		        $response = addHeaders ($response);
+		        $response = createJwT ($response);
+		        $data = array('nom' => $utilisateur->getNom(), 'prenom' => $utilisateur->getPrenom());
+		        $response->getBody()->write(json_encode($data));
+		    } else {
+		        $response = $response->withStatus(403);
+                $response->getBody()->write(json_encode(["message" => "Identifiant ou mot de passe incorrect."]));
+		    }
+	    } else {
+		    $response = $response->withStatus(500);
+            $response->getBody()->write(json_encode(["message" => "Identifiant ou mot de passe non valide"]));
+	    }
+
 	    return addHeaders ($response);
 	}
+
+
+    function postRegister(Request $request, Response $response, $args) {
+        global $entityManager;
+        $body = $request->getParsedBody();
+        $nom = $body['nom'] ?? "";
+        $prenom = $body['prenom'] ?? "";
+        $sexe = $body['sexe'] ?? "";
+        $email = $body['email'] ?? "";
+        $telephone = $body['telephone'] ?? "";
+        $adresse = $body['adresse'] ?? "";
+        $cp = $body['codepostal'] ?? "";
+        $ville = $body['ville'] ?? "";
+        $login = $body ['login'] ?? "";
+        $pass = $body ['password'] ?? "";
+
+        $utilisateur = new Utilisateurs;
+        $utilisateur->setNom($nom);
+        $utilisateur->setPrenom($prenom);
+        $utilisateur->setSexe($sexe);
+        $utilisateur->setEmail($email);
+        $utilisateur->setTelephone($telephone);
+        $utilisateur->setAdresse($adresse);
+        $utilisateur->setCodePostal($cp);
+        $utilisateur->setVille($ville);
+        $utilisateur->setLogin($login);
+        $utilisateur->setPassword($pass);
+
+        try {
+            $entityManager->persist($utilisateur);
+            $entityManager->flush();
+        } catch (Exception $e) {
+            $response = $response->withStatus(500);
+            $response->getBody()->write(json_encode(["message" => $e->getMessage()]));
+        }
+
+        $response = addHeaders ($response);
+        return addHeaders ($response);
+
+    }
 
